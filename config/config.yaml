@@ -1,0 +1,152 @@
+# ============================================================================
+# Example configuration for the workload-gap methodology.
+# This is a generic, sanitized configuration -- no team, roster, or season-
+# specific values. Everything an analyst might want to change lives here,
+# not in code.
+# ============================================================================
+
+project:
+  name: "Workload Gap -- example configuration"
+
+# ---------------------------------------------------------------------------
+# COMPARISON GROUPS
+# The unit of analysis is "who can actually replace whom". A raw position
+# label is a starting point, not the answer: fill `substitution_groups` in
+# once real substitution rules are known. Until then `use_raw_position` keeps
+# the raw position labels.
+# ---------------------------------------------------------------------------
+groups:
+  use_raw_position: true
+
+  # Merge noisy / synonymous labels before anything else.
+  label_aliases:
+    DB: CB
+    DL: DT
+    OLB: LB
+
+  # Coarse taxonomy used in the American-football literature (Ellis et al.;
+  # Wellman et al.). Kept as a fallback grouping when a position group is too
+  # small to analyse on its own.
+  archetypes:
+    big:       [OL, DT, DE]
+    big_skill: [LB, TE, QB]
+    skill:     [WR, CB, SAF, RB]
+
+  # The real thing, once confirmed. Example shape:
+  # substitution_groups:
+  #   OT:  [...]        # tackles only
+  #   OG_C: [...]       # guards and centre
+  #   SECONDARY: [...]  # if corners and safeties genuinely cross
+  substitution_groups: {}
+
+  exclude_positions: [Coach, SPT]   # specialists analysed separately
+  min_players_per_group: 6
+
+# ---------------------------------------------------------------------------
+# QUALITY CONTROL
+# Each rule exists because of a real problem seen in wearable-GPS exports.
+# ---------------------------------------------------------------------------
+quality:
+  min_player_load: 50           # below this the unit was on but the athlete was not working
+  max_velocity_ceiling_mph: 25  # anything above this is a GPS artefact, not a real reading
+  # A session where >30% of participating athletes record max velocity of exactly
+  # zero is indoor / no GPS fix. IMU metrics stay valid; every distance and
+  # velocity field is a structural zero and must be excluded.
+  indoor_zero_velocity_share: 0.30
+  min_sessions_per_athlete: 10  # see reliability analysis; 10 is the floor, not the target
+  # Dates dropped outright regardless of window -- known equipment/collection
+  # problems, not statistical outliers. Populate with specific dates as needed.
+  excluded_dates: []
+
+# ---------------------------------------------------------------------------
+# LOAD DIMENSIONS
+# Deliberately few and conceptually defined, NOT data-driven weights.
+# PCA-derived weights over-weight whichever indicators happen to be most
+# correlated, which is the opposite of what we want here.
+# Within a dimension, member metrics are z-scored within position group and
+# averaged with equal weight.
+# ---------------------------------------------------------------------------
+dimensions:
+  volume:
+    label: "Volume"
+    question: "How much work in total?"
+    metrics: [total_player_load, total_distance]
+  mechanical:
+    label: "Mechanical"
+    question: "How much hard accelerating and braking?"
+    metrics: [ima_accel_decel_high, ima_accel_decel_medium, acceleration_load]
+  change_of_direction:
+    label: "Change of direction"
+    question: "How much hard cutting?"
+    metrics: [ima_cod_high, ima_cod_medium]
+  high_speed:
+    label: "High speed"
+    question: "How much running near top speed?"
+    metrics: [high_speed_distance, high_speed_efforts, max_velocity]
+  collision:
+    label: "Collision"
+    question: "How much contact?"
+    metrics: [total_contact_load, total_contacts]
+  # Density is defined but disabled by default: Total Duration in a typical
+  # export is the SESSION clock, not the athlete's working time, so every
+  # per-minute metric is a rescaled copy of its total. Re-enable once a real
+  # exposure denominator (snaps, or on-field time) exists.
+  density:
+    label: "Density"
+    question: "How hard per unit of exposure?"
+    metrics: [player_load_per_minute]
+    enabled: false
+    disabled_reason: "No valid exposure denominator in the current export."
+
+# ---------------------------------------------------------------------------
+# GAP QUANTIFICATION
+# ---------------------------------------------------------------------------
+gap:
+  # Who each player is compared against.
+  #   depth_rank_1 : the listed starter        (requires a depth chart)
+  #   group_top    : the busiest player        (fallback, used until then)
+  #   group_median : the typical player
+  reference: depth_rank_1
+
+  # Hopkins' thresholds for standardised differences, used to label a gap.
+  effect_thresholds:
+    trivial: 0.2
+    small: 0.6
+    moderate: 1.2
+    large: 2.0
+
+  # Flag a player when his multivariate gap exceeds this percentile of the
+  # within-group distribution.
+  flag_percentile: 0.80
+
+  bootstrap_iterations: 2000
+  random_seed: 11
+
+# ---------------------------------------------------------------------------
+# CANONICAL METRIC NAMES
+# Wearable-GPS column names differ between exports and change between
+# platform versions. Intake maps whatever it finds onto these names; add
+# aliases rather than editing code.
+# ---------------------------------------------------------------------------
+metric_aliases:
+  total_player_load:     ["Total Player Load"]
+  player_load_per_minute: ["Player Load Per Minute"]
+  total_distance:        ["Total Distance", "Total Distance (y)"]
+  acceleration_load:     ["Acceleration Load"]
+  accel_decel_efforts:   ["Accel + Decel Efforts"]
+  explosive_efforts:     ["Explosive Efforts", "Total Explosive Efforts"]
+  max_velocity:          ["Maximum Velocity (mph)", "Maximum Velocity"]
+  high_speed_distance:   ["Total High Speed Dist (y)", "Total High Speed Distance (>12mph)"]
+  high_speed_efforts:    ["Total High Speed Efforts", "High Speed Efforts (>12mph)"]
+  total_contact_load:    ["Total Contact Load"]
+  total_contacts:        ["Total Contacts"]
+  heart_rate_exertion:   ["Heart Rate Exertion"]
+  high_cuts:             ["Total High Cuts"]
+  ima_accel_high:        ["IMA Accel High"]
+  ima_decel_high:        ["IMA Decel High"]
+  ima_accel_medium:      ["IMA Accel Medium"]
+  ima_decel_medium:      ["IMA Decel Medium"]
+  ima_cod_left_high:     ["IMA CoD Left High"]
+  ima_cod_right_high:    ["IMA CoD Right High"]
+  ima_cod_left_medium:   ["IMA CoD Left Medium"]
+  ima_cod_right_medium:  ["IMA CoD Right Medium"]
