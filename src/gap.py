@@ -410,14 +410,20 @@ def multivariate_gap(profiles: pd.DataFrame, cfg: Config,
             d = row[dims].to_numpy(dtype=float) - m   # this athlete's 5-dimension vector minus the reference
             q = Sinv @ d
             d2 = float(d @ q)                          # squared Mahalanobis distance
-            contrib = d * q    # per-dimension pieces that sum to d2 -- "which dimension drove this athlete's distance"
 
             # Distance is symmetric: an athlete who does MORE than the reference
             # is also "far" from it, which is not a readiness problem. The
             # deficit distance keeps only the dimensions where he is BELOW the
             # reference, and is the number to use for "is he ready".
             deficit = np.minimum(d, 0.0)
-            d2_def = float(deficit @ Sinv @ deficit)
+            q_def = Sinv @ deficit
+            d2_def = float(deficit @ q_def)
+            # Per-dimension pieces that sum to d2_def -- "which dimension is
+            # driving this athlete's DEFICIT". Built from the same clamped
+            # vector as deficit_distance itself, not the two-sided d/q above,
+            # so a dimension where he's actually ahead of the reference can
+            # never be named as the driver of a deficit he doesn't have.
+            contrib = deficit * q_def
 
             rec = {"group": group, "athlete": row["athlete"],
                    "n_sessions": row["n_sessions"],
@@ -427,8 +433,10 @@ def multivariate_gap(profiles: pd.DataFrame, cfg: Config,
                    "reference_kind": ref.loc[group, "reference_kind"],
                    "reference_members": ref.loc[group, "reference_members"]}
             # Express each dimension's contribution as a share of the total
-            # (so they read as e.g. "62% of his gap is collision"), guarding
-            # against a zero total (reference athlete himself: d is all 0s).
+            # deficit (so they read as e.g. "62% of his deficit is collision"),
+            # guarding against a zero total -- nothing to be behind on at all
+            # (the reference athlete himself, or anyone at/above reference on
+            # every dimension).
             total = contrib.sum()
             for nm, c in zip(names, contrib):
                 rec[f"share_{nm}"] = float(c / total) if total > 0 else np.nan

@@ -201,6 +201,34 @@ def test_deficit_distance_ignores_doing_more_than_the_reference():
     assert res.loc["A1", "flagged"]
 
 
+def test_driven_by_never_names_a_dimension_the_athlete_is_ahead_on():
+    """share_<dim>/driven_by must come from the same clamped (behind-only)
+    vector as deficit_distance -- not the two-sided mahalanobis d/q -- or an
+    athlete who is massively ahead on one dimension and only mildly behind
+    on another gets driven_by pointing at the dimension he's AHEAD on."""
+    rng = np.random.default_rng(42)
+    n = 40
+    prof = pd.DataFrame({
+        "group": ["WR"] * n, "athlete": [f"A{i}" for i in range(n)],
+        "n_sessions": 20,
+        "dim_volume_shrunk": rng.normal(size=n),
+        "dim_mechanical_shrunk": rng.normal(size=n),
+    })
+    # Way ahead on volume (+6), only mildly behind on mechanical (-0.3) --
+    # the two-sided distance is dominated by volume; the deficit is not.
+    prof.loc[0, ["dim_volume_shrunk", "dim_mechanical_shrunk"]] = [6.0, -0.3]
+
+    cfg = Config.load()
+    cfg.raw["dimensions"] = {k: {"label": k, "question": "", "metrics": ["x"]}
+                             for k in ("volume", "mechanical")}
+    cfg.raw["gap"]["reference"] = "group_median"
+    res = gap.multivariate_gap(prof, cfg).set_index("athlete")
+
+    assert res.loc["A0", "mahalanobis"] > res.loc["A0", "deficit_distance"]
+    assert res.loc["A0", "driven_by"] == "mechanical"
+    assert res.loc["A0", "share_volume"] == pytest.approx(0.0, abs=1e-9)
+
+
 def test_canonical_position_resolves_multi_label_athletes(cfg):
     """A real roster export often has some athletes logged under more than one
     position label across their sessions. Group membership has to be decided

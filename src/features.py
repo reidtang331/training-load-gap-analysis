@@ -103,6 +103,61 @@ def build_dimensions(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     return out
 
 
+def zscore_within_group_by_player_mean(df: pd.DataFrame, metrics: list[str],
+                                       group_col: str = "group",
+                                       athlete_col: str = "athlete") -> pd.DataFrame:
+    """Standardise each metric using the spread of PLAYER averages within the
+    group, instead of the spread of individual sessions (see
+    zscore_within_group above).
+
+    Most practice-to-practice variation is day-to-day noise, not a real
+    difference between players (ICCs commonly 0.1-0.3 in this kind of data --
+    see docs/methods.md's reliability section), so the session-pooled SD that
+    zscore_within_group divides by is substantially smaller than the spread
+    of players' own averages. A "1 SD" gap in that unit therefore reads
+    roughly half the size it would in player-to-player terms. This produces
+    the player-to-player unit instead, reported ALONGSIDE the session unit
+    (see build_dimensions_player_unit below), not in place of it.
+    """
+    out = df.copy()
+    for m in metrics:
+        # One row per athlete's own mean first, so the SD below is the
+        # spread of PLAYER averages -- a session-weighted SD-of-means would
+        # double-count whichever athlete happened to have the most sessions.
+        athlete_mean = out.groupby([group_col, athlete_col])[m].transform("mean")
+        player_means = (out.assign(_player_mean=athlete_mean)
+                           .drop_duplicates([group_col, athlete_col]))
+        spread = player_means.groupby(group_col)["_player_mean"].std()
+        centre = player_means.groupby(group_col)["_player_mean"].mean()
+        sd = out[group_col].map(spread)
+        mu = out[group_col].map(centre)
+        out[f"zplayer_{m}"] = np.where(sd > 0, (out[m] - mu) / sd, np.nan)
+    return out
+
+
+def build_dimensions_player_unit(df: pd.DataFrame, cfg: Config) -> pd.DataFrame:
+    """Same as build_dimensions, but in the player-to-player SD unit (see
+    zscore_within_group_by_player_mean) rather than the session-pooled one.
+
+    Column names match build_dimensions exactly (dim_<name>, dim_<name>_
+    n_metrics), so this frame runs through athlete_profiles / gap.shrink /
+    gap.dimension_gaps / gap.multivariate_gap completely unchanged -- same
+    pipeline, differently-scaled input, not a second implementation of any
+    of that logic.
+    """
+    metrics = [m for m in cfg.dimension_metrics if m in df.columns]
+    out = zscore_within_group_by_player_mean(df, metrics)
+
+    for name, spec in cfg.enabled_dimensions.items():
+        members = [f"zplayer_{m}" for m in spec["metrics"] if f"zplayer_{m}" in out.columns]
+        if not members:
+            out[f"dim_{name}"] = np.nan
+            continue
+        out[f"dim_{name}"] = out[members].mean(axis=1, skipna=True)
+        out[f"dim_{name}_n_metrics"] = out[members].notna().sum(axis=1)
+    return out
+
+
 def dimension_columns(cfg: Config) -> list[str]:
     """The ["dim_volume", "dim_mechanical", ...] column names, in config order."""
     return [f"dim_{k}" for k in cfg.enabled_dimensions]
